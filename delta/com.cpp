@@ -70,6 +70,8 @@ ModbusSerialOpen(int port)
 				"ERROR: Unable to retrieve the current control settings for a specified communications device for the port %d\nCONTEXT: system errcode=%d",
 				port,
 				GetLastError());
+			ModbusSerialClose();
+			return false;
 		}
 
 		Dcb.fParity = true; // enable parity check
@@ -84,6 +86,7 @@ ModbusSerialOpen(int port)
 				"ERROR: Unable to configure the port %d\nCONTEXT: system errcode=%d",
 				port,
 				GetLastError());
+			ModbusSerialClose();
 			return false;
 		}
 
@@ -92,6 +95,7 @@ ModbusSerialOpen(int port)
 			snprintf(modbus_errmsg, ERRMSG_MAX_LEN,
 				"ERROR: Unable to set the data parameters for the port %d",
 				port);
+			ModbusSerialClose();
 			return false;
 		}
 
@@ -106,6 +110,7 @@ ModbusSerialOpen(int port)
 			snprintf(modbus_errmsg, ERRMSG_MAX_LEN,
 				"ERROR: Unable to set the time-out parameters for the port %d",
 				port);
+			ModbusSerialClose();
 			return false;
 		}
 	}
@@ -116,6 +121,7 @@ ModbusSerialOpen(int port)
 			"ERROR in EscapeCommFunction for the port %d\nCONTEXT: system errcode=%d",
 			port,
 			GetLastError());
+		ModbusSerialClose();
 		return false;
 	}
 
@@ -174,7 +180,7 @@ ModbusSerialRequest(const char* msg)
 		A2H[0] = buf[i];
 		A2H[1] = buf[i + 1];
 
-		sscanf(A2H, "%02X", &value);
+		(void)sscanf(A2H, "%02X", &value);
 		//		printf("%d/%d (%s) : %d\n", i, strlen(buf), A2H, value);
 		assert(value < 256);
 		lrcbuf[lrclen++] = (byte)value;

@@ -30,3 +30,8 @@
 *.exe
 *.out
 *.app
+*.log
+*.tlog
+console/x64/*
+console/Debug/*
+delta/x64/*

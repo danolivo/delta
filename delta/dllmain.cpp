@@ -46,6 +46,8 @@ char recvmsg[MAX_BUFFER_LENGTH];
 
 static int com_port_number = -1; /* -1 - not initialized. */
 
+static FILE* output = NULL; /* destination for log output */
+
 BOOL APIENTRY DllMain(HMODULE hModule,
 	DWORD  ul_reason_for_call,
 	LPVOID lpReserved
@@ -54,9 +56,24 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 	switch (ul_reason_for_call)
 	{
 	case DLL_PROCESS_ATTACH:
+	{
+		FILE* f = fopen("logfile.log", "wt");
+
+		assert(f != NULL);
+
+		/* Debugging output disabled by default */
+		output = f;
+	}
+	break;
+
 	case DLL_THREAD_ATTACH:
 	case DLL_THREAD_DETACH:
 	case DLL_PROCESS_DETACH:
+		if (!output || output == stdout)
+			break;
+
+		/* Cleanup on exit */
+		fclose(output);
 		break;
 	}
 	return TRUE;
@@ -66,9 +83,10 @@ static bool IsRegistersEmpty(const char* data, int nreqs);
 static int send_modbus_data(const char* input, int timeout);
 
 /*
-* Fill sendbuf structure with the message data in correct MODBUS format.
-* Returns number of bytes received (see recvmsg for this bytes).
-*/
+ * Fill sendbuf structure with the message data in correct MODBUS format.
+ * Returns number of bytes received (see recvmsg for this bytes)
+ * or -1 on error (See the errmsg string for details).
+ */
 static int
 send_modbus_data(const char* input, int timeout)
 {
@@ -114,12 +132,12 @@ send_modbus_data(const char* input, int timeout)
 
 			/* recvbuf[0] == ':' */
 			if (i == 1)
-				sscanf(A2H, "%02X", &resp_device_addr);
+				(void)sscanf(A2H, "%02X", &resp_device_addr);
 			else if (i == 3)
-				sscanf(A2H, "%02X", &resp_command_code);
+				(void)sscanf(A2H, "%02X", &resp_command_code);
 			else
 				/* i == 5 */
-				sscanf(A2H, "%02X", &received);
+				(void)sscanf(A2H, "%02X", &received);
 
 			assert(i <= 5);
 		}
@@ -285,17 +303,43 @@ execute_command(int command)
 int
 DCM_Connection(int portnum)
 {
-	int res;
+	int errcode;
+
+	assert(portnum >= 0);
+
+	if (com_port_number > 0)
+	{
+		/* Disconnect before establishing a new connection. */
+		DCM_Disconnection();
+		com_port_number = -1;
+	}
 
 	if (portnum != 0)
 	{
 		/* Try to connect to portnum */
-		if (!ModbusSerialOpen(com_port_number))
+		if (!ModbusSerialOpen(portnum))
 		{
-			printf("COM%d: error on opening: \'%s\'\n", com_port_number, modbus_errmsg);
-			return DCM_Disconnection();
+			fprintf(output, "COM%d: error on opening: \'%s\'\n", portnum, modbus_errmsg);
+			goto cleanup;
 		}
-		return portnum;
+
+		/* Serial port opened. Set current port value. */
+		com_port_number = portnum;
+
+		/* Initial cleaning of registers. */
+		if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) < 0)
+		{
+			fprintf(output, "Error during cleaning of the service registers of controller.\nCONTEXT:%s (errcode = %d)\n", errmsg, errcode);
+			goto cleanup;
+		}
+
+		if ((errcode = execute_command(CHECK_PROTOCOL)) <= 0)
+		{
+			fprintf(output, "Error during controller recognizing.\nCONTEXT:%s (%d)\n", errmsg, errcode);
+			goto cleanup;
+		}
+
+		return com_port_number;
 	}
 
 	/* Auto search of connected device */
@@ -303,32 +347,100 @@ DCM_Connection(int portnum)
 	{
 		if (!ModbusSerialOpen(com_port_number))
 		{
-			printf("COM%d: error on opening: \'%s\'\n", com_port_number, modbus_errmsg);
+			fprintf(output, "COM%d: error on opening: \'%s\'\n", com_port_number, modbus_errmsg);
 			DCM_Disconnection();
 			continue;
 		}
 
-		/* Initial clean registers. */
+		/* Initial cleaning of registers. */
 		send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
 
 		/* Port opened without errors. Check for the controller. */
-		if ((res = execute_command(CHECK_PROTOCOL)) <= 0)
+		if ((errcode = execute_command(CHECK_PROTOCOL)) <= 0)
 		{
-			printf("Error during controller recognizing.\nCONTEXT:%s (%d)\n", errmsg, res);
+			fprintf(output, "Error during controller recognizing.\nCONTEXT:%s (errcode=%d)\n", errmsg, errcode);
+			DCM_Disconnection();
+			continue;
 		}
 		else
-			printf("Connection with controller established\n");
-
-		DCM_Disconnection();
+		{
+			fprintf(output, "Connection with controller %d established\n", com_port_number);
+			return com_port_number;
+		}
 	}
+
+cleanup:
+	com_port_number = -1;
+	DCM_Disconnection();
+	return com_port_number;
 }
 
 /*
  * Return 0 if OK.
  */
-int
+bool
 DCM_Disconnection()
 {
-	com_port_number = -1;
+	assert(com_port_number != 0);
 	return !ModbusSerialClose();
+}
+
+void
+DCM_Enable_logging(const char* filename)
+{
+	if (DCM_IsLoggingEnabled())
+		/* Already enabled */
+		return;
+
+	if (filename == NULL)
+	{
+		/* Set stdout as destination for log messages */
+		output = stdout;
+	}
+	/*
+		if (OUTNUL != NULL)
+		{
+			fclose(OUTNUL);
+			OUTNUL = NULL;
+		}
+	*/
+}
+
+/*
+ * Disable logging if enabled.
+ * Return true, if logging had enabled. otherwise, false.
+ */
+bool
+DCM_Disable_logging()
+{
+	FILE* f;
+
+	if (!DCM_IsLoggingEnabled())
+		/* already disabled */
+		return false;
+
+	f = fopen("logfile.log", "wt");
+	assert(f != NULL);
+	/*	if (OUTNUL == NULL)
+		{
+			OUTNUL = fopen("nul", "w");
+			assert(OUTNUL != NULL);
+		}
+		*/
+	if (output == stdout)
+		/* Can't close stdout */
+		output = f;
+	else
+		fclose(output);
+
+	return true;
+}
+
+bool
+DCM_IsLoggingEnabled()
+{
+	if (!output || output != stdout)
+		return false;
+	else
+		return true;
 }

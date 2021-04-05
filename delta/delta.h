@@ -16,4 +16,8 @@ typedef enum
 } OpRes_t;
 
 extern "C" DELTA_API int DCM_Connection(int portnum);
-extern "C" DELTA_API int DCM_Disconnection(void);
+extern "C" DELTA_API bool DCM_Disconnection(void);
+
+extern "C" DELTA_API void DCM_Enable_logging(const char* filename);
+extern "C" DELTA_API bool DCM_Disable_logging(void);
+extern "C" DELTA_API bool DCM_IsLoggingEnabled();
