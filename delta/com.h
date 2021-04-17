@@ -1,7 +1,8 @@
 #pragma once
 
+#include "common.h"
+
 #define MAX_BUFFER_LENGTH	(1024)
-#define ERRMSG_MAX_LEN		(1024)
 
 /*
  * Default address for the controller.
