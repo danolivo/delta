@@ -483,8 +483,8 @@ execute_command(int command, const char* data)
 			return -4;
 		}
 	}
-	else
-		return 0;
+
+	return 0;
 }
 
 /*
