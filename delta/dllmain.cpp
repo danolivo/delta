@@ -274,7 +274,7 @@ IsRegistersEmpty(const char* data, int nreqs)
  * from the controller-side.
  * Return 0 on success. Otherwise, return -1.
  */
-static int
+static errcode_t
 wait_cmd_cleanup(int timeout)
 {
 	time_t start, end;
@@ -292,17 +292,17 @@ wait_cmd_cleanup(int timeout)
 
 		if (IsRegistersEmpty(recvmsg, 1))
 			/* Success */
-			return 0;
+			return SUCCESS;
 	} while (seconds < timeout);
 
-	return -1;
+	return CNTL_UNKNOWN_PROBLEM;
 }
 
-static int
+static errcode_t
 wait_cmd_result(int timeout)
 {
 	time_t start;
-	int errcode = 0;
+	errcode_t errcode;
 	double seconds;
 
 	start = time(NULL);
@@ -315,10 +315,10 @@ wait_cmd_result(int timeout)
 
 		if (!IsRegistersEmpty(recvmsg, 1))
 			/* Success */
-			return 0;
+			return SUCCESS;
 	} while (seconds < timeout);
 
-	return -1;
+	return CNTL_UNKNOWN_PROBLEM;
 }
 
 /*
@@ -327,10 +327,10 @@ wait_cmd_result(int timeout)
 * Errors of DLL itself < 0.
 * Errors of a controller > 0.
 */
-static int
+static errcode_t
 execute_command(int command, const char* data)
 {
-	int errcode = 0;
+	errcode_t errcode;
 	char wrtdatareq[COMMAND_MAX_LENGTH];
 
 	assert(com_port_number > 0);
@@ -360,7 +360,7 @@ execute_command(int command, const char* data)
 		snprintf(errmsg, ERRMSG_MAX_LEN,
 			"COM%d: Controller registers is not empty.\nDETAILS: device_addr=%d, data in registers=\'%s\'",
 			com_port_number, DEVICE_ADDR, recvmsg);
-		return -1;
+		return CNTL_FORMAT_VIOLENCE;
 	}
 
 	switch (command)
@@ -371,20 +371,20 @@ execute_command(int command, const char* data)
 			return errcode;
 
 		/* Wait for reaction of the controller program. */
-		if (wait_cmd_cleanup(1) != 0)
+		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
 				com_port_number, recvmsg);
-			return -2;
+			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != 0)
+		if (wait_cmd_result(5) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
-			return -3;
+			return CNTL_TIMEOUT_EXPIRED;
 		}
 
 		if (strcmp(recvmsg, "1F1F") != 0)
@@ -392,7 +392,7 @@ execute_command(int command, const char* data)
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller doesn't return correct value.\nDETAILS: data in registers=\'%s\'",
 				com_port_number, recvmsg);
-			return -3;
+			return CNTL_FORMAT_INCORRECT_SIGN;
 		}
 
 		break;
@@ -411,22 +411,22 @@ execute_command(int command, const char* data)
 		elog(LOG, "COMMAND '%s' and data '%s' has written to controller.", REQ_WRITE_ADD_ITEM, data);
 
 		/* Wait for reaction of the controller program. */
-		if (wait_cmd_cleanup(1) != 0)
+		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
 				com_port_number, recvmsg);
-			return -2;
+			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		elog(LOG, "Controller cleaned its registers.");
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != 0)
+		if (wait_cmd_result(5) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
-			return -3;
+			return CNTL_TIMEOUT_EXPIRED;
 		}
 
 		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
@@ -475,22 +475,22 @@ execute_command(int command, const char* data)
 		elog(LOG, "COMMAND '%s' and data '%s' has written to controller.", REQ_WRITE_GET_ITEM, data);
 
 		/* Wait for reaction of the controller program. */
-		if (wait_cmd_cleanup(1) != 0)
+		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
 				com_port_number, recvmsg);
-			return -2;
+			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		elog(LOG, "Controller cleaned its registers.");
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != 0)
+		if (wait_cmd_result(5) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
-			return -3;
+			return CNTL_TIMEOUT_EXPIRED;
 		}
 
 		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
@@ -526,7 +526,7 @@ execute_command(int command, const char* data)
 
 	default:
 		snprintf(errmsg, ERRMSG_MAX_LEN, "Incorrect command");
-		errcode = -1;
+		errcode = CNTL_UNKNOWN_PROBLEM;
 		break;
 	}
 
@@ -547,20 +547,20 @@ execute_command(int command, const char* data)
 				"Error during cleaning of the service registers at the end of command\n%s\n(errcode=%d).",
 				ptr, errcode);
 			free(ptr);
-			return -4;
+			return CNTL_FORMAT_VIOLENCE;
 		}
 	}
 
-	return 0;
+	return SUCCESS;
 }
 
 /*
  * Connect to controller by modbus ASCII protocol that can understand
  * our logic of connection.
  * Use 0 to auto search.
- * Return the number of the serial port or an error code < 0.
+ * Return SUCCESS or the error number.
  */
-int
+errcode_t
 DCM_Connection(int portnum)
 {
 	int errcode;
@@ -569,7 +569,7 @@ DCM_Connection(int portnum)
 	{
 		fprintf(stderr, "Database doesn't opened. You can't do any operations before explicit creation of the database.");
 		Sleep(2000);
-		return -2;
+		return DB_NOT_OPENED;
 	}
 
 	assert(portnum >= 0);
@@ -608,7 +608,7 @@ DCM_Connection(int portnum)
 
 		/* Connection established. Log this fact. */
 		elog(CLOG, "Connection with controller %d established", com_port_number);
-		return com_port_number;
+		return SUCCESS;
 	}
 
 	/* Auto search of connected device */
@@ -634,14 +634,14 @@ DCM_Connection(int portnum)
 		else
 		{
 			elog(CLOG, "Connection with controller %d established", com_port_number);
-			return com_port_number;
+			return SUCCESS;
 		}
 	}
 
 cleanup:
 	com_port_number = -1;
 	DCM_Disconnection();
-	return com_port_number;
+	return SUCCESS;
 }
 
 /*

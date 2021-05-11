@@ -19,7 +19,10 @@ typedef enum errcode_t
 	/*
 	* Errors, returned by controller.
 	*/
-	CNTL_UNKNOWN_CONTROLLER_PROBLEM
+	CNTL_UNKNOWN_PROBLEM,
+	CNTL_FORMAT_VIOLENCE,
+	CNTL_TIMEOUT_EXPIRED,
+	CNTL_FORMAT_INCORRECT_SIGN
 
 	/* ... */
 } errcode_t;

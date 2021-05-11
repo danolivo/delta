@@ -21,7 +21,7 @@
 /* Error string that can be read by user of this DLL. */
 extern "C" DELTA_API char DCMErrStr[ERRMSG_MAX_LEN];
 
-extern "C" DELTA_API int DCM_Connection(int portnum);
+extern "C" DELTA_API errcode_t DCM_Connection(int portnum);
 extern "C" DELTA_API bool DCM_Disconnection(void);
 
 /*
