@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <windows.h>
 
+#include "errcodes.h"
 #include "delta.h"
 
 static int global_state = 0;
@@ -45,6 +46,7 @@ show_help()
 	printf("h - this text.\n");
 	printf("i - create database file (if still doesn't exists).\n");
 	printf("r - reset database.\n");
+	printf("z - dump database.\n");
 	printf("q - exit from this program.\n");
 }
 
@@ -127,6 +129,9 @@ execute_console_command(char cmd)
 		break;
 	}
 
+	case 'z': /* Dump database */
+		break;
+
 	default:
 		printf("%c - unknown command!\n", cmd);
 		Sleep(1000);
@@ -171,11 +176,11 @@ show_status()
 	else
 		printf("NONE.\n");
 
-	printf("Database: ");
+	printf("DATABASE: ");
 	if (DCM_Check_database())
 		printf("connected\n");
 	else
-		printf("not connected.\nDETAILS: %s\n", DCMErrStr);
+		printf("not connected (%s)\n", DCMErrStr);
 }
 
 int

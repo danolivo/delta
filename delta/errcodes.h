@@ -8,8 +8,11 @@ typedef enum errcode_t
 	/*
 	 * Errors, related to this code
 	 */
+	DB_UNKNOWN_PROBLEM,
 	DB_NOT_OPENED,
-	EAN_CODE_FORMAT,
+	DB_ACCESS_FAILED,
+	DB_INCORRECT_STATE,
+	INCORRECT_EAN_FORMAT,
 
 	/* MODBUS-related errors. */
 	MODBUS_UNKNOWN_PROBLEM,

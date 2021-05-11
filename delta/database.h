@@ -9,9 +9,10 @@ extern char dbpathname[PATH_STR_MAX_LEN];
 
 extern bool is_database_exists(const char* path);
 extern bool is_database_opened(void);
-extern bool check_database();
+extern bool check_database(void);
+extern bool dump_database(void);
 
-extern bool open_database(const char* path, bool create);
+extern errcode_t open_database(const char* path, bool create);
 extern void close_database(void);
 extern bool create_schema();
 extern int db_cell_number(const char* EANCode);

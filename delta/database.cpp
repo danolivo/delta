@@ -110,7 +110,7 @@ check_database()
 	return ok;
 }
 
-bool
+errcode_t
 open_database(const char* path, bool create)
 {
 	assert(path != NULL);
@@ -122,7 +122,7 @@ open_database(const char* path, bool create)
 	if (sqlite3_open(dbpathname, &db))
 	{
 		snprintf(dberrstr, ERRMSG_MAX_LEN, "Error on open/create database: %s", sqlite3_errmsg(db));
-		return false;
+		return DB_ACCESS_FAILED;
 	}
 
 	if (create)
@@ -131,14 +131,15 @@ open_database(const char* path, bool create)
 	if (!check_database())
 	{
 		char* tmp = _strdup(dberrstr);
+
 		snprintf(dberrstr, ERRMSG_MAX_LEN,
 			"Incorrect database structure.\nCONTEXT: %s.", tmp);
 		free(tmp);
-		return false;
+		return DB_INCORRECT_STATE;
 	}
 
 	elog(CLOG, "Database opened correctly.");
-	return true;
+	return SUCCESS;
 }
 
 void
@@ -351,4 +352,30 @@ db_get_cell_code(int cellnum)
 		return NULL;
 	}
 	return _strdup(code);
+}
+
+static int
+dumpdb_cb(void* a_param, int argc, char** argv, char** column)
+{
+	printf("arc: %d %s", argc, argv[0]);
+	if (argc != 1)
+		return -1;
+
+	return 0;
+}
+
+bool
+dump_database()
+{
+	const char* SQL = "SELECT * FROM data WHERE EANcode IS NOT NULL";
+	char* err = 0;
+
+	if (sqlite3_exec(db, SQL, dumpdb_cb, NULL, &err))
+	{
+		snprintf(dberrstr, ERRMSG_MAX_LEN, "SQL error: '%s'", err);
+		sqlite3_free(err);
+		return false;
+	}
+
+	return true;
 }

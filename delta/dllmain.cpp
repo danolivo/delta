@@ -129,7 +129,7 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 		if (is_database_exists(path))
 		{
 			/* If database file exists, but it is empty, close connection. */
-			if (!open_database(path, false))
+			if (open_database(path, false) != SUCCESS)
 			{
 				elog(CLOG, "ERROR: Database can't be opened:\n%s", dberrstr);
 
@@ -647,7 +647,7 @@ cleanup:
 /*
  * Return 0 if OK.
  */
-bool
+errcode_t
 DCM_Disconnection()
 {
 	bool result;
@@ -656,7 +656,7 @@ DCM_Disconnection()
 	{
 		fprintf(stderr, "Database doesn't opened. You can't do any operations before explicit creation of the database.");
 		Sleep(2000);
-		return true;
+		return SUCCESS;
 	}
 
 	assert(com_port_number != 0);
@@ -666,7 +666,7 @@ DCM_Disconnection()
 		/* Log action of successful disconnection */
 		elog(CLOG, "Disconnect the controller on serial port %d.", com_port_number);
 
-	return !result;
+	return result ? SUCCESS : DB_UNKNOWN_PROBLEM;
 }
 
 void
@@ -725,10 +725,10 @@ DCM_IsLoggingEnabled()
 /*
  * Directly it'd be used for debug purposes, mostly.
  */
-bool
+errcode_t
 DCM_Put_item(unsigned int cellnum, code_t code)
 {
-	int errcode;
+	errcode_t errcode;
 	char AH4[5] = { 0 };
 	char* tmpcode;
 
@@ -739,14 +739,14 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Database doesn't opened. You can't do any operations before explicit creation of the database.\nCONTEXT: %s\n",
 			dberrstr);
-		return false;
+		return DB_NOT_OPENED;
 	}
 
 	/* Check EAN code */
-	if (!checkEANcode(code))
+	if ((errcode = checkEANcode(code)) != SUCCESS)
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Incorrect code: %s.\n", code);
-		return false;
+		return errcode;
 	}
 
 	sprintf(AH4, "%04X", cellnum);
@@ -756,29 +756,29 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Cell %d doesn't empty. code='%s'\n", cellnum, tmpcode);
 		free(tmpcode);
-		return false;
+		return DB_INCORRECT_STATE;
 	}
 
 	elog(LOG, "Try to put EAN code %s to cellnum: %d (%s)", code, cellnum, AH4);
 
-	if ((errcode = execute_command(ADD_NEW_ITEM, AH4)) != 0)
+	if ((errcode = execute_command(ADD_NEW_ITEM, AH4)) != SUCCESS)
 	{
 		elog(CLOG,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
-		return false;
+		return errcode;
 	}
 
-	assert(errcode == 0);
+	assert(errcode == SUCCESS);
 	if (!db_store_code(cellnum, code))
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Error during storing the result in the database.\nDETAILS: %s", dberrstr);
-		return false;
+		return DB_ACCESS_FAILED;
 	}
 	elog(LOG, "Addition of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
-	return true;
+	return SUCCESS;
 }
 
 /*
@@ -792,10 +792,11 @@ DCM_Put_item(unsigned int cellnum, code_t code)
  * - Величина таймаута - настраиваемая величина.
  * 7. Если код результата - SUCCESS, то записать в БД EAN code в соответствующую ячейку.
   */
-bool
+errcode_t
 DCM_Add_item(code_t code)
 {
 	int cellnum;
+	errcode_t errcode;
 
 	memset(DCMErrStr, 0, ERRMSG_MAX_LEN);
 
@@ -804,21 +805,21 @@ DCM_Add_item(code_t code)
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Database doesn't opened. You can't do any operations before explicit creation of the database.\nCONTEXT: %s\n",
 			dberrstr);
-		return false;
+		return DB_NOT_OPENED;
 	}
 
 	cellnum = db_cell_number(NULL);
 	if (cellnum < 0)
 	{
 		/* Error during searching for a cell. */
-		printf("ERR CODE: %s, cellnum: %d", code, cellnum);
-		return false;
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "ERR CODE: %s, cellnum: %d", code, cellnum);
+		return DB_INCORRECT_STATE;
 	}
 
-	if (!DCM_Put_item(cellnum, code))
-		return false;
+	if ((errcode = DCM_Put_item(cellnum, code)) != SUCCESS)
+		return errcode;
 
-	return true;
+	return SUCCESS;
 }
 
 errcode_t
@@ -838,10 +839,10 @@ DCM_Get_item(code_t code)
 		return DB_NOT_OPENED;
 	}
 
-	if (!checkEANcode(code))
+	if (checkEANcode(code) != SUCCESS)
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Incorrect EAN code '%s'.\n", code);
-		return EAN_CODE_FORMAT;
+		return INCORRECT_EAN_FORMAT;
 	}
 
 	cellnum = db_cell_number(code);
@@ -849,7 +850,7 @@ DCM_Get_item(code_t code)
 
 	elog(LOG, "Try to get EAN code %s from cellnum: %d (%s)", code, cellnum, AH4);
 
-	if ((errcode = execute_command(GET_EAN_ITEM, AH4)) != SUCCESS)
+	if ((errcode = execute_command(GET_CELLNUM_ITEM, AH4)) != SUCCESS)
 	{
 		elog(CLOG,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
@@ -863,7 +864,7 @@ DCM_Get_item(code_t code)
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Error during storing the result in the database.\nDETAILS: %s", dberrstr);
-		return false;
+		return DB_ACCESS_FAILED;
 	}
 	elog(LOG, "Addition of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
 
@@ -881,9 +882,9 @@ DCM_Get_path()
  * For security reasons it will return error if such file still exists.
  * You must drop this file manually before the call.
  *
- * Return true on success or false on error.
+ * Return error code.
  */
-bool
+errcode_t
 DCM_Create_database()
 {
 	assert(strlen(path) > 0);
@@ -892,15 +893,15 @@ DCM_Create_database()
 	if (is_database_exists(path))
 	{
 		elog(ERR, "The database file exists. You must explicitly drop it before creating the new.");
-		return false;
+		return DB_UNKNOWN_PROBLEM;
 	}
 	else
 	{
-		bool result;
+		errcode_t result;
 
 		/* Create database file and init the schema */
 		result = open_database(path, true);
-		if (result)
+		if (result == SUCCESS)
 		{
 			elog(CLOG, "Database file with path %s was created.", path);
 			memset(DBStateError, 0, ERRMSG_MAX_LEN);
@@ -963,19 +964,25 @@ DCM_Clear()
 	return true;
 }
 
-bool
+errcode_t
 checkEANcode(const char* str)
 {
 	int i;
 
 	if (strlen(str) != 13)
-		return false;
+		return INCORRECT_EAN_FORMAT;
 
 	for (i = 0; i < strlen(str); i++)
 	{
 		if (!isdigit(str[i]))
-			return false;
+			return INCORRECT_EAN_FORMAT;
 	}
 
-	return true;
+	return SUCCESS;
+}
+
+void
+DCM_Dump_database()
+{
+	dump_database();
 }
