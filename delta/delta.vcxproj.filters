@@ -33,6 +33,9 @@
     <ClInclude Include="com.h">
       <Filter>Файлы заголовков</Filter>
     </ClInclude>
+    <ClInclude Include="errcodes.h">
+      <Filter>Файлы заголовков</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp">

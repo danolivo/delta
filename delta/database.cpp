@@ -240,23 +240,25 @@ cell_number_cb(void* a_param, int argc, char** argv, char** column)
 }
 
 /*
- * Get number of an empty cell.
+ * Get number of a cell.
+ * If EANCode is NULL, return a first free cell number.
+ * Other case, return a first cell, contains this EANCode value.
  * Return cell number in the range of [1 .. CELLS_NUMBER] or error code < 0.
  */
 int
-db_empty_cell_number()
+db_cell_number(const char *EANCode)
 {
 	char* err = 0;
-	const char* SQL = "SELECT cell FROM data WHERE EANcode IS NULL ORDER BY (cell) ASC LIMIT 1";
+	char SQL[QUERY_STR_MAX_LEN];
 	int cellnum = -1;
 
 	memset(dberrstr, 0, ERRMSG_MAX_LEN);
+	assert(db == NULL);
 
-	if (db == NULL)
-	{
-		snprintf(dberrstr, ERRMSG_MAX_LEN, "Database doesn't opened.");
-		return -1;
-	}
+	if (EANCode == NULL)
+		sprintf(SQL, "SELECT cell FROM data WHERE EANcode IS NULL ORDER BY(cell) ASC LIMIT 1");
+	else
+		sprintf(SQL, "SELECT cell FROM data WHERE EANcode ='%s' ORDER BY(cell) ASC LIMIT 1", EANCode);
 
 	if (sqlite3_exec(db, SQL, cell_number_cb, (void*)&cellnum, &err))
 	{
@@ -267,9 +269,7 @@ db_empty_cell_number()
 
 	if (cellnum == -1)
 	{
-		/*
-		 * No free cells found.
-		 */
+		/* No free cells found. */
 		snprintf(dberrstr, ERRMSG_MAX_LEN, "No free cells found.");
 		return -3;
 	}

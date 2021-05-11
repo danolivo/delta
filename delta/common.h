@@ -1,6 +1,7 @@
 #pragma once
 
 #include <time.h>
+#include "errcodes.h"
 
 /* Type of variable for an EAN code. */
 typedef char code_t[14];

@@ -5,6 +5,7 @@
 #include "windows.h"
 
 #include "com.h"
+#include "common.h"
 #include "database.h"
 #include "delta.h"
 
@@ -19,14 +20,16 @@
 
 #define REQ_WRITE_CMD_RECOGNIZE		":011010640001021F1F"
 #define REQ_WRITE_ADD_ITEM			":011010640001020001"
+#define REQ_WRITE_GET_ITEM			":011010640001020002"
 #define REQ_WRITE_DATA_REG			":01101065000102" /* Prefix of the 'write to the data register' modbus ASCII string */
 #define REQ_WRITE_CLEAN				":01101064000306000000000000"
 
 #define MAGIC_WORD "1F1F"
 
 /* Commands for a controller*/
-#define CHECK_PROTOCOL	(1)
-#define ADD_NEW_ITEM	(2)
+#define CHECK_PROTOCOL		(1)
+#define ADD_NEW_ITEM		(2)
+#define GET_CELLNUM_ITEM	(3)
 
 static unsigned char sendbuf[MAX_BUFFER_LENGTH];
 static char recvbuf[MAX_BUFFER_LENGTH];
@@ -169,14 +172,14 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 static bool IsRegistersEmpty(const char* data, int nreqs);
 BOOL DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved);
-static int send_modbus_data(const char* input, int timeout);
+static errcode_t send_modbus_data(const char* input, int timeout);
 
 /*
  * Fill sendbuf structure with the message data in correct MODBUS format.
- * Returns number of bytes received (see recvmsg for this bytes)
- * or -1 on error (See the errmsg string for details).
+ * Returns SUCCESS (see recvmsg for this bytes)
+ * or error code (See errcodes.h and the errmsg string for details).
  */
-static int
+static errcode_t
 send_modbus_data(const char* input, int timeout)
 {
 	unsigned int i;
@@ -194,7 +197,7 @@ send_modbus_data(const char* input, int timeout)
 		snprintf(errmsg, ERRMSG_MAX_LEN,
 			"Request to COM%d failed.\nDETAILS: device_addr=%d, input data=\'%s\'",
 			com_port_number, DEVICE_ADDR, input);
-		return -1;
+		return MODBUS_REQUEST_FAILED;
 	}
 
 	/* Response for result. */
@@ -204,7 +207,7 @@ send_modbus_data(const char* input, int timeout)
 		snprintf(errmsg, ERRMSG_MAX_LEN,
 			"COM%d: No data received on response.\nDETAILS: device_addr=%d, input data=\'%s\'\nCONTEXT: %s",
 			com_port_number, DEVICE_ADDR, input, modbus_errmsg);
-		return -1;
+		return MODBUS_RESPONSE_FAILED;
 	}
 
 	if (buflen > 0)
@@ -245,12 +248,11 @@ send_modbus_data(const char* input, int timeout)
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller error \'%s\'.\nDETAILS: device_addr=%d, input data=\'%s\'",
 				com_port_number, recvmsg, DEVICE_ADDR, input);
-			return -1;
+			return MODBUS_UNKNOWN_PROBLEM;
 		}
-		//		printf("--- EEE: %s %d %d\n", recvmsg, received, buflen);
 	}
 
-	return received;
+	return SUCCESS;
 }
 
 static bool
@@ -276,13 +278,13 @@ static int
 wait_cmd_cleanup(int timeout)
 {
 	time_t start, end;
-	int errcode = 0;
+	errcode_t errcode;
 	double seconds;
 
 	start = time(NULL);
 	do
 	{
-		if ((errcode = send_modbus_data(REQ_READ_CMD, DEFAULT_TIMEOUT)) < 0)
+		if ((errcode = send_modbus_data(REQ_READ_CMD, DEFAULT_TIMEOUT)) != SUCCESS)
 			return errcode;
 
 		end = time(NULL);
@@ -442,6 +444,71 @@ execute_command(int command, const char* data)
 
 			/* Save error message before sending cleanup command. */
 			ptr = _strdup(errmsg);
+			/*
+			 * Try to clean registers. We don't know details of this problem
+			 * and don't check result of this operation.
+			 */
+			(void) send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+
+			/* Restore error message. */
+			memset(errmsg, 0, ERRMSG_MAX_LEN);
+			snprintf(errmsg, ERRMSG_MAX_LEN, "%s", ptr);
+			free(ptr);
+
+			return errcode;
+		}
+		break;
+
+	case GET_CELLNUM_ITEM: /* Send command to extract a product from the cell */
+		assert(strlen(wrtdatareq) > 0);
+
+		elog(LOG, "START MODBUS command chain to extract a product. modbus cmd='%s'\n", wrtdatareq);
+
+		/* Write data */
+		if ((errcode = send_modbus_data(wrtdatareq, DEFAULT_TIMEOUT)) < 0)
+			return errcode;
+
+		/* Write command */
+		if ((errcode = send_modbus_data(REQ_WRITE_GET_ITEM, DEFAULT_TIMEOUT)) < 0)
+			return errcode;
+
+		elog(LOG, "COMMAND '%s' and data '%s' has written to controller.", REQ_WRITE_GET_ITEM, data);
+
+		/* Wait for reaction of the controller program. */
+		if (wait_cmd_cleanup(1) != 0)
+		{
+			snprintf(errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
+				com_port_number, recvmsg);
+			return -2;
+		}
+
+		elog(LOG, "Controller cleaned its registers.");
+
+		/* Wait for result code. */
+		if (wait_cmd_result(5) != 0)
+		{
+			snprintf(errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
+			return -3;
+		}
+
+		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
+
+		if (strcmp(recvmsg, "0002") != 0)
+		{
+			char* ptr;
+
+			(void)sscanf(recvmsg, "%02X", &errcode);
+			elog(LOG, "Error detected: errcode = '%d'.", errcode);
+
+			snprintf(errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Controller failed to get the item.\nDETAILS: error code in register=\'%s\'",
+				com_port_number, recvmsg);
+
+			/* Save error message before sending cleanup command. */
+			ptr = _strdup(errmsg);
+
 			/*
 			 * Try to clean registers. We don't know details of this problem
 			 * and don't check result of this operation.
@@ -676,13 +743,14 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 	}
 
 	/* Check EAN code */
-	if (strlen(code) != 13)
+	if (!checkEANcode(code))
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Incorrect code: %s.\n", code);
 		return false;
 	}
 
 	sprintf(AH4, "%04X", cellnum);
+	/* Sanity check: get EAN code from the cell. It would be NULL in normal case. */
 	tmpcode = db_get_cell_code(cellnum);
 	if (strlen(tmpcode) != 0)
 	{
@@ -693,7 +761,7 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 
 	elog(LOG, "Try to put EAN code %s to cellnum: %d (%s)", code, cellnum, AH4);
 
-	if ((errcode = execute_command(ADD_NEW_ITEM, AH4) != 0))
+	if ((errcode = execute_command(ADD_NEW_ITEM, AH4)) != 0)
 	{
 		elog(CLOG,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
@@ -739,7 +807,7 @@ DCM_Add_item(code_t code)
 		return false;
 	}
 
-	cellnum = db_empty_cell_number();
+	cellnum = db_cell_number(NULL);
 	if (cellnum < 0)
 	{
 		/* Error during searching for a cell. */
@@ -751,6 +819,55 @@ DCM_Add_item(code_t code)
 		return false;
 
 	return true;
+}
+
+errcode_t
+DCM_Get_item(code_t code)
+{
+	int cellnum;
+	char AH4[5] = { 0 };
+	errcode_t errcode;
+
+	memset(DCMErrStr, 0, ERRMSG_MAX_LEN);
+
+	if (!is_database_opened())
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
+			"Database doesn't opened. You can't do any operations before explicit creation of the database.\nCONTEXT: %s\n",
+			dberrstr);
+		return DB_NOT_OPENED;
+	}
+
+	if (!checkEANcode(code))
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Incorrect EAN code '%s'.\n", code);
+		return EAN_CODE_FORMAT;
+	}
+
+	cellnum = db_cell_number(code);
+	sprintf(AH4, "%04X", cellnum);
+
+	elog(LOG, "Try to get EAN code %s from cellnum: %d (%s)", code, cellnum, AH4);
+
+	if ((errcode = execute_command(GET_EAN_ITEM, AH4)) != SUCCESS)
+	{
+		elog(CLOG,
+			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
+			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
+		return errcode;
+	}
+
+	assert(errcode == 0);
+	if (!db_store_code(cellnum, code))
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
+			"Error during storing the result in the database.\nDETAILS: %s", dberrstr);
+		return false;
+	}
+	elog(LOG, "Addition of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
+
+	return SUCCESS;
 }
 
 const char*
@@ -843,5 +960,22 @@ DCM_Clear()
 	}
 
 	elog(CLOG, "Database %s has cleared.", path);
+	return true;
+}
+
+bool
+checkEANcode(const char* str)
+{
+	int i;
+
+	if (strlen(str) != 13)
+		return false;
+
+	for (i = 0; i < strlen(str); i++)
+	{
+		if (!isdigit(str[i]))
+			return false;
+	}
+
 	return true;
 }
