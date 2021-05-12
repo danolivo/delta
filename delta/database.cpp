@@ -246,36 +246,37 @@ cell_number_cb(void* a_param, int argc, char** argv, char** column)
  * Other case, return a first cell, contains this EANCode value.
  * Return cell number in the range of [1 .. CELLS_NUMBER] or error code < 0.
  */
-int
-db_cell_number(const char *EANCode)
+errcode_t
+db_cell_number(const char *EANCode, int *cellnum)
 {
 	char* err = 0;
 	char SQL[QUERY_STR_MAX_LEN];
-	int cellnum = -1;
-
+	
+	*cellnum = -1;
 	memset(dberrstr, 0, ERRMSG_MAX_LEN);
 	assert(db == NULL);
+	assert(cellnum != NULL);
 
 	if (EANCode == NULL)
 		sprintf(SQL, "SELECT cell FROM data WHERE EANcode IS NULL ORDER BY(cell) ASC LIMIT 1");
 	else
 		sprintf(SQL, "SELECT cell FROM data WHERE EANcode ='%s' ORDER BY(cell) ASC LIMIT 1", EANCode);
 
-	if (sqlite3_exec(db, SQL, cell_number_cb, (void*)&cellnum, &err))
+	if (sqlite3_exec(db, SQL, cell_number_cb, (void*)cellnum, &err))
 	{
 		snprintf(dberrstr, ERRMSG_MAX_LEN, "SQL error: '%s'", err);
 		sqlite3_free(err);
-		return -2;
+		return DB_ACCESS_FAILED;
 	}
 
-	if (cellnum == -1)
+	if (*cellnum <= 0)
 	{
-		/* No free cells found. */
-		snprintf(dberrstr, ERRMSG_MAX_LEN, "No free cells found.");
-		return -3;
+		/* Not found. */
+		snprintf(dberrstr, ERRMSG_MAX_LEN, "No one cell found.");
+		return DB_CELL_NOT_FOUND;
 	}
 
-	return cellnum;
+	return SUCCESS;
 }
 
 /*
@@ -354,13 +355,21 @@ db_get_cell_code(int cellnum)
 	return _strdup(code);
 }
 
+static bool ShowHeadline = true;
+
 static int
 dumpdb_cb(void* a_param, int argc, char** argv, char** column)
 {
-	printf("arc: %d %s", argc, argv[0]);
-	if (argc != 1)
+	if (argc != 2)
 		return -1;
 
+	if (ShowHeadline)
+	{
+		elog(CLOG, "%12s | %12s", column[0], column[1]);
+		ShowHeadline = false;
+	}
+
+	elog(CLOG, "%12s | %12s", argv[0], argv[1]);
 	return 0;
 }
 
@@ -374,8 +383,10 @@ dump_database()
 	{
 		snprintf(dberrstr, ERRMSG_MAX_LEN, "SQL error: '%s'", err);
 		sqlite3_free(err);
+		ShowHeadline = true;
 		return false;
 	}
 
+	ShowHeadline = true;
 	return true;
 }

@@ -554,6 +554,12 @@ execute_command(int command, const char* data)
 	return SUCCESS;
 }
 
+int
+DCM_Conn_serial()
+{
+	return com_port_number;
+}
+
 /*
  * Connect to controller by modbus ASCII protocol that can understand
  * our logic of connection.
@@ -563,12 +569,11 @@ execute_command(int command, const char* data)
 errcode_t
 DCM_Connection(int portnum)
 {
-	int errcode;
+	errcode_t errcode;
 
 	if (!is_database_opened())
 	{
-		fprintf(stderr, "Database doesn't opened. You can't do any operations before explicit creation of the database.");
-		Sleep(2000);
+		elog(ERR, "Database doesn't opened. You can't do any operations before explicit creation of the database.");
 		return DB_NOT_OPENED;
 	}
 
@@ -614,6 +619,8 @@ DCM_Connection(int portnum)
 	/* Auto search of connected device */
 	for (com_port_number = 1; com_port_number < 10; com_port_number++)
 	{
+		elog(LOG, "Discover COM%d", com_port_number);
+
 		if (!ModbusSerialOpen(com_port_number))
 		{
 			elog(ERR, "COM%d: error on opening: \'%s\'\n", com_port_number, modbus_errmsg);
@@ -621,11 +628,16 @@ DCM_Connection(int portnum)
 			continue;
 		}
 
-		/* Initial cleaning of registers. */
-		send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+		/* Initial cleaning of registers. We don't know that will return this device, so try next on any errors. */
+		if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) != SUCCESS)
+		{
+			elog(ERR, "Error during initial cleaning of registers.\nCONTEXT:%s (errcode=%d)\n", errmsg, errcode);
+			DCM_Disconnection();
+			continue;
+		}
 
 		/* Port opened without errors. Check for the controller. */
-		if ((errcode = execute_command(CHECK_PROTOCOL, 0)) != 0)
+		if ((errcode = execute_command(CHECK_PROTOCOL, 0)) != SUCCESS)
 		{
 			elog(ERR, "Error during controller recognizing.\nCONTEXT:%s (errcode=%d)\n", errmsg, errcode);
 			DCM_Disconnection();
@@ -641,7 +653,7 @@ DCM_Connection(int portnum)
 cleanup:
 	com_port_number = -1;
 	DCM_Disconnection();
-	return SUCCESS;
+	return CONN_UNKNOWN_PROBLEM;
 }
 
 /*
@@ -808,12 +820,11 @@ DCM_Add_item(code_t code)
 		return DB_NOT_OPENED;
 	}
 
-	cellnum = db_cell_number(NULL);
-	if (cellnum < 0)
+	if ((errcode = db_cell_number(NULL, &cellnum)) != SUCCESS)
 	{
 		/* Error during searching for a cell. */
-		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "ERR CODE: %s, cellnum: %d", code, cellnum);
-		return DB_INCORRECT_STATE;
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "ERR CODE: %s, cellnum: %d (errcode=%d)", code, cellnum, errcode);
+		return errcode;
 	}
 
 	if ((errcode = DCM_Put_item(cellnum, code)) != SUCCESS)
@@ -845,7 +856,12 @@ DCM_Get_item(code_t code)
 		return INCORRECT_EAN_FORMAT;
 	}
 
-	cellnum = db_cell_number(code);
+	if ((errcode = db_cell_number(code, &cellnum)) != SUCCESS)
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Can't find a cell for EAN code '%s'.\n", code);
+		return errcode;
+	}
+
 	sprintf(AH4, "%04X", cellnum);
 
 	elog(LOG, "Try to get EAN code %s from cellnum: %d (%s)", code, cellnum, AH4);

@@ -3,6 +3,7 @@
 typedef enum errcode_t
 {
 	/* General */
+	CONN_UNKNOWN_PROBLEM,
 	SUCCESS,
 
 	/*
@@ -11,6 +12,7 @@ typedef enum errcode_t
 	DB_UNKNOWN_PROBLEM,
 	DB_NOT_OPENED,
 	DB_ACCESS_FAILED,
+	DB_CELL_NOT_FOUND,
 	DB_INCORRECT_STATE,
 	INCORRECT_EAN_FORMAT,
 

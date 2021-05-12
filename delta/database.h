@@ -15,7 +15,7 @@ extern bool dump_database(void);
 extern errcode_t open_database(const char* path, bool create);
 extern void close_database(void);
 extern bool create_schema();
-extern int db_cell_number(const char* EANCode);
+extern errcode_t db_cell_number(const char* EANCode, int *cellnum);
 extern bool db_store_code(unsigned int cellnum, code_t code);
 extern char* db_get_cell_code(int cellnum);
 extern bool clear_database(void);

@@ -7,7 +7,6 @@
 #include "delta.h"
 
 static int global_state = 0;
-static int portnum = -1;
 
 static void debugging_delay(void);
 static void clear_screen(char fill);
@@ -40,6 +39,7 @@ show_help()
 {
 	printf("Commands:\n");
 	printf("a - add a product with 13-digit EAN code.\n");
+	printf("e - extract a product with 13-digit EAN code.\n");
 	printf("c - connect to controller.\n");
 	printf("d - enable/disable logging.\n");
 	printf("f - close connection to controller.\n");
@@ -89,11 +89,10 @@ execute_console_command(char cmd)
 		break;
 
 	case 'f': /* Close connection to current controller. */
-		if (portnum < 0)
+		if (DCM_Conn_serial() < 0)
 			break;
 
-		printf("Close connection for the serial No. %d.\n", portnum);
-		portnum = -1;
+		printf("Close connection for the serial No. %d.\n", DCM_Conn_serial());
 		DCM_Disconnection();
 		debugging_delay();
 		break;
@@ -130,6 +129,9 @@ execute_console_command(char cmd)
 	}
 
 	case 'z': /* Dump database */
+		printf("Dump database.\n");
+		DCM_Dump_database();
+		debugging_delay();
 		break;
 
 	default:
@@ -171,8 +173,8 @@ show_status()
 
 	printf("CONNECTION: ");
 
-	if (portnum > 0)
-		printf("established, serial No.: %d.\n", portnum);
+	if (DCM_Conn_serial() > 0)
+		printf("established, serial No.: %d.\n", DCM_Conn_serial());
 	else
 		printf("NONE.\n");
 
@@ -194,7 +196,7 @@ main(int argc, char** argv)
 	do {
 		clear_screen();
 		show_status();
-		//		printf("ARGS: %d %s - %s\n", argc, argv[0], p1);
+
 		switch (global_state)
 		{
 		case 0: /* main screen */
@@ -214,12 +216,11 @@ main(int argc, char** argv)
 			assert(strlen(pnum) == 1);
 			(void)sscanf(pnum, "%d", &num);
 			assert(num >= 0 && num < 10);
-			portnum = DCM_Connection(num);
 
-			if (portnum > 0)
-				printf("Connection on COM%d established.\n", portnum);
+			if ((errcode = DCM_Connection(num)) == SUCCESS)
+				printf("Connection on COM%d established.\n", DCM_Conn_serial());
 			else
-				printf("Error on Serial. Connection attempt was for number %d.\n", num);
+				printf("Error on Serial. Connection attempt was for number %d (errcode=%d).\n", num, errcode);
 
 			global_state = 0;
 			debugging_delay();
@@ -264,7 +265,7 @@ main(int argc, char** argv)
 			else
 			{
 				if ((errcode = DCM_Get_item(code)) != SUCCESS)
-					printf("A product extraction problems.\nDETAILS: %s. ERRCODE: %d", DCMErrStr, errcode);
+					printf("A product extraction problems.\nDETAILS: %s (errcode=%d).\n", DCMErrStr, errcode);
 			}
 
 			global_state = 0;

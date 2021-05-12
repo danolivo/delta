@@ -108,3 +108,5 @@ extern "C" DELTA_API const char* DCM_Get_path();
 
 /* Return true, of string contains symbols in correct EAN code format */
 extern "C" DELTA_API errcode_t checkEANcode(const char* str);
+
+extern "C" DELTA_API int DCM_Conn_serial(void);
