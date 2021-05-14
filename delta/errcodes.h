@@ -1,10 +1,10 @@
 #pragma once
 
-typedef enum errcode_t
+typedef enum dcm_errcode_t
 {
 	/* General */
 	CONN_UNKNOWN_PROBLEM,
-	SUCCESS,
+	SUCCESS = 1,
 
 	/*
 	 * Errors, related to this code
@@ -30,4 +30,4 @@ typedef enum errcode_t
 	CNTL_FORMAT_INCORRECT_SIGN
 
 	/* ... */
-} errcode_t;
+} dcm_errcode_t;

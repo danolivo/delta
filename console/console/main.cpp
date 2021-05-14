@@ -189,7 +189,7 @@ int
 main(int argc, char** argv)
 {
 	char cmd = '\0';
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 
 	assert(argc >= 0);
 
@@ -255,17 +255,33 @@ main(int argc, char** argv)
 			code_t code = { 0 };
 			int count;
 
-			printf("Write the 13-digit code and press enter: ");
+			printf("Write the 13-digit code (or 0) and press ENTER: ");
 			FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
 
 			count = scanf("%13s", code);
+			assert(count == 1);
 
-			if (!checkEANcode(code))
+			if (strcmp(code, "0") == 0)
+			{
+				unsigned int cellnum;
+
+				/* Extract product by cell number */
+				printf("Write the cell number in the range from 1 to %d and press ENTER: ", CELLS_NUMBER);
+				FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+				count = scanf("%u", &cellnum);
+	
+				if (count != 1 || cellnum < 1 || cellnum > CELLS_NUMBER)
+					printf("Incorrect cell number: '%d'!\n", cellnum);
+
+				if ((errcode = DCM_Extract_from_cell(cellnum, code)) != SUCCESS)
+					printf("Error of extracting a product from the cell %u (errcode=%d).\n", cellnum, errcode);
+			}
+			else if (!checkEANcode(code))
 				printf("Incorrect EAN code '%s'!", code);
 			else
 			{
 				if ((errcode = DCM_Get_item(code)) != SUCCESS)
-					printf("A product extraction problems.\nDETAILS: %s (errcode=%d).\n", DCMErrStr, errcode);
+					printf("A product extraction with EAN '%s' problems (errcode=%d).\n", code, errcode);
 			}
 
 			global_state = 0;

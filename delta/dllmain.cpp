@@ -172,14 +172,14 @@ BOOL APIENTRY DllMain(HMODULE hModule,
 
 static bool IsRegistersEmpty(const char* data, int nreqs);
 BOOL DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved);
-static errcode_t send_modbus_data(const char* input, int timeout);
+static dcm_errcode_t send_modbus_data(const char* input, int timeout);
 
 /*
  * Fill sendbuf structure with the message data in correct MODBUS format.
  * Returns SUCCESS (see recvmsg for this bytes)
  * or error code (See errcodes.h and the errmsg string for details).
  */
-static errcode_t
+static dcm_errcode_t
 send_modbus_data(const char* input, int timeout)
 {
 	unsigned int i;
@@ -274,11 +274,11 @@ IsRegistersEmpty(const char* data, int nreqs)
  * from the controller-side.
  * Return 0 on success. Otherwise, return -1.
  */
-static errcode_t
+static dcm_errcode_t
 wait_cmd_cleanup(int timeout)
 {
 	time_t start, end;
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 	double seconds;
 
 	start = time(NULL);
@@ -298,12 +298,12 @@ wait_cmd_cleanup(int timeout)
 	return CNTL_UNKNOWN_PROBLEM;
 }
 
-static errcode_t
+static dcm_errcode_t
 wait_cmd_result(int timeout)
 {
-	time_t start;
-	errcode_t errcode;
-	double seconds;
+	time_t			start;
+	dcm_errcode_t	errcode;
+	double			seconds;
 
 	start = time(NULL);
 	do
@@ -327,10 +327,10 @@ wait_cmd_result(int timeout)
 * Errors of DLL itself < 0.
 * Errors of a controller > 0.
 */
-static errcode_t
+static dcm_errcode_t
 execute_command(int command, const char* data)
 {
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 	char wrtdatareq[COMMAND_MAX_LENGTH];
 
 	assert(com_port_number > 0);
@@ -460,6 +460,9 @@ execute_command(int command, const char* data)
 		break;
 
 	case GET_CELLNUM_ITEM: /* Send command to extract a product from the cell */
+	{
+		char tmp_errmsg[ERRMSG_MAX_LEN] = { 0 };
+
 		assert(strlen(wrtdatareq) > 0);
 
 		elog(LOG, "START MODBUS command chain to extract a product. modbus cmd='%s'\n", wrtdatareq);
@@ -477,9 +480,11 @@ execute_command(int command, const char* data)
 		/* Wait for reaction of the controller program. */
 		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
-			snprintf(errmsg, ERRMSG_MAX_LEN,
-				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
+			snprintf(tmp_errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Controller doesn't clean the command register.\nDETAILS: data in registers=\'%s\'",
 				com_port_number, recvmsg);
+			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+			memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
 			return CNTL_FORMAT_VIOLENCE;
 		}
 
@@ -488,14 +493,16 @@ execute_command(int command, const char* data)
 		/* Wait for result code. */
 		if (wait_cmd_result(5) != SUCCESS)
 		{
-			snprintf(errmsg, ERRMSG_MAX_LEN,
-				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
+			snprintf(tmp_errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Timeout expired. Controller doesn't return result code", com_port_number);
+			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+			memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
 			return CNTL_TIMEOUT_EXPIRED;
 		}
 
 		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
 
-		if (strcmp(recvmsg, "0002") != 0)
+		if (strcmp(recvmsg, "0001") != 0)
 		{
 			char* ptr;
 
@@ -513,7 +520,7 @@ execute_command(int command, const char* data)
 			 * Try to clean registers. We don't know details of this problem
 			 * and don't check result of this operation.
 			 */
-			send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
 
 			/* Restore error message. */
 			memset(errmsg, 0, ERRMSG_MAX_LEN);
@@ -523,15 +530,17 @@ execute_command(int command, const char* data)
 			return errcode;
 		}
 		break;
+	}
 
 	default:
 		snprintf(errmsg, ERRMSG_MAX_LEN, "Incorrect command");
-		errcode = CNTL_UNKNOWN_PROBLEM;
+		(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+		return CNTL_UNKNOWN_PROBLEM;
 		break;
 	}
 
 	/* Finally, clean registers in accordance with our convention. */
-	if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) < 0)
+	if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) != SUCCESS)
 	{
 		size_t errmsglen = strlen(errmsg);
 		char* ptr;
@@ -544,7 +553,7 @@ execute_command(int command, const char* data)
 			ptr = _strdup(errmsg);
 			snprintf(errmsg,
 				ERRMSG_MAX_LEN,
-				"Error during cleaning of the service registers at the end of command\n%s\n(errcode=%d).",
+				"Error during cleaning of the service registers at the end of command\n%s\n(errcode=%d).\nHINT: try to reboot the controller.",
 				ptr, errcode);
 			free(ptr);
 			return CNTL_FORMAT_VIOLENCE;
@@ -566,10 +575,10 @@ DCM_Conn_serial()
  * Use 0 to auto search.
  * Return SUCCESS or the error number.
  */
-errcode_t
+dcm_errcode_t
 DCM_Connection(int portnum)
 {
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 
 	if (!is_database_opened())
 	{
@@ -659,7 +668,7 @@ cleanup:
 /*
  * Return 0 if OK.
  */
-errcode_t
+dcm_errcode_t
 DCM_Disconnection()
 {
 	bool result;
@@ -737,10 +746,10 @@ DCM_IsLoggingEnabled()
 /*
  * Directly it'd be used for debug purposes, mostly.
  */
-errcode_t
+dcm_errcode_t
 DCM_Put_item(unsigned int cellnum, code_t code)
 {
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 	char AH4[5] = { 0 };
 	char* tmpcode;
 
@@ -804,11 +813,11 @@ DCM_Put_item(unsigned int cellnum, code_t code)
  * - Величина таймаута - настраиваемая величина.
  * 7. Если код результата - SUCCESS, то записать в БД EAN code в соответствующую ячейку.
   */
-errcode_t
+dcm_errcode_t
 DCM_Add_item(code_t code)
 {
 	int cellnum;
-	errcode_t errcode;
+	dcm_errcode_t errcode;
 
 	memset(DCMErrStr, 0, ERRMSG_MAX_LEN);
 
@@ -833,12 +842,46 @@ DCM_Add_item(code_t code)
 	return SUCCESS;
 }
 
-errcode_t
+/*
+ * Exract a product from the cell. Return errcode and set the code parameter
+ * to EAN code that was stored in this cell or zero-length string,
+ * if the cell was empty.
+ */
+dcm_errcode_t
+DCM_Extract_from_cell(unsigned int cellnum, code_t code)
+{
+	char AH4[5] = { 0 };
+	dcm_errcode_t errcode;
+
+	sprintf(AH4, "%04X", cellnum);
+
+	elog(LOG, "Try to get EAN code %s from cellnum: %d (%s)", code, cellnum, AH4);
+
+	if ((errcode = execute_command(GET_CELLNUM_ITEM, AH4)) != SUCCESS)
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Item extraction problem.\nDETAILS: %s.", errmsg);
+		elog(ERR, "%s", DCMErrStr);
+		return errcode;
+	}
+
+	assert(errcode == SUCCESS);
+	if (!db_remove_code(cellnum, code))
+	{
+		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
+			"Error during cleaning the cell %d in the database.\nDETAILS: %s", cellnum, dberrstr);
+		return DB_ACCESS_FAILED;
+	}
+	elog(LOG, "Extraction of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
+
+	return SUCCESS;
+}
+
+dcm_errcode_t
 DCM_Get_item(code_t code)
 {
 	int cellnum;
-	char AH4[5] = { 0 };
-	errcode_t errcode;
+	dcm_errcode_t errcode;
+	code_t tmpcode;
 
 	memset(DCMErrStr, 0, ERRMSG_MAX_LEN);
 
@@ -862,29 +905,9 @@ DCM_Get_item(code_t code)
 		return errcode;
 	}
 
-	sprintf(AH4, "%04X", cellnum);
-
-	elog(LOG, "Try to get EAN code %s from cellnum: %d (%s)", code, cellnum, AH4);
-
-	if ((errcode = execute_command(GET_CELLNUM_ITEM, AH4)) != SUCCESS)
-	{
-		elog(CLOG,
-			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
-		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
-			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
-		return errcode;
-	}
-
-	assert(errcode == 0);
-	if (!db_store_code(cellnum, code))
-	{
-		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
-			"Error during storing the result in the database.\nDETAILS: %s", dberrstr);
-		return DB_ACCESS_FAILED;
-	}
-	elog(LOG, "Addition of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
-
-	return SUCCESS;
+	errcode = DCM_Extract_from_cell(cellnum, tmpcode);
+	assert(strcmp(code, tmpcode) == 0);
+	return errcode;
 }
 
 const char*
@@ -900,7 +923,7 @@ DCM_Get_path()
  *
  * Return error code.
  */
-errcode_t
+dcm_errcode_t
 DCM_Create_database()
 {
 	assert(strlen(path) > 0);
@@ -913,7 +936,7 @@ DCM_Create_database()
 	}
 	else
 	{
-		errcode_t result;
+		dcm_errcode_t result;
 
 		/* Create database file and init the schema */
 		result = open_database(path, true);
@@ -980,7 +1003,7 @@ DCM_Clear()
 	return true;
 }
 
-errcode_t
+dcm_errcode_t
 checkEANcode(const char* str)
 {
 	int i;

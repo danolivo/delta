@@ -4,6 +4,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 16.0.31205.134
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "console", "console\console.vcxproj", "{042A86B2-3605-4170-8DC6-9942D41D3AB4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{5505075B-4241-48D3-9E1B-B6BBA4B6C74C} = {5505075B-4241-48D3-9E1B-B6BBA4B6C74C}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "delta", "..\delta\delta.vcxproj", "{5505075B-4241-48D3-9E1B-B6BBA4B6C74C}"
 EndProject

@@ -18,11 +18,12 @@
  * ############################################################################
  */
 
-/* Error string that can be read by user of this DLL. */
+/* Error explanation. Should be used for DEBUG purposes. */
 extern "C" DELTA_API char DCMErrStr[ERRMSG_MAX_LEN];
 
-extern "C" DELTA_API errcode_t DCM_Connection(int portnum);
-extern "C" DELTA_API errcode_t DCM_Disconnection(void);
+
+extern "C" DELTA_API dcm_errcode_t DCM_Connection(int portnum);
+extern "C" DELTA_API dcm_errcode_t DCM_Disconnection(void);
 
 /*
  * Clear all data in the database. This is critical action and it
@@ -35,19 +36,19 @@ extern "C" DELTA_API bool DCM_Clear(void);
  * Add a product into the machine. Returns 0 if operation completed successfully.
  * Otherwise, returns an error code.
  */
-extern "C" DELTA_API errcode_t DCM_Add_item(code_t code);
+extern "C" DELTA_API dcm_errcode_t DCM_Add_item(code_t code);
 
 /*
  * Extract one product from the machine. Returns SUCCESS if operation completed successfully.
  * Otherwise, returns an error code.
  */
-extern "C" DELTA_API errcode_t DCM_Get_item(code_t code);
+extern "C" DELTA_API dcm_errcode_t DCM_Get_item(code_t code);
 
 /*
  * Create a database file in the directory where current DLL is placed.
  * For security reasons we do it explicitly.
  */
-extern "C" DELTA_API errcode_t DCM_Create_database(void);
+extern "C" DELTA_API dcm_errcode_t DCM_Create_database(void);
 
 
 /*
@@ -82,6 +83,9 @@ extern FILE* flog;
 	} \
 	if (level == ERR) \
 	{ \
+		fprintf(flog, "%s: ERROR: ", current_time_str()); \
+		fprintf(flog, __VA_ARGS__); \
+		fprintf(flog, "\n"); \
 		fprintf(stderr, __VA_ARGS__); \
 		fprintf(stderr, "\n"); \
 	} \
@@ -107,6 +111,9 @@ extern "C" DELTA_API void DCM_Dump_database(void);
 extern "C" DELTA_API const char* DCM_Get_path();
 
 /* Return true, of string contains symbols in correct EAN code format */
-extern "C" DELTA_API errcode_t checkEANcode(const char* str);
+extern "C" DELTA_API dcm_errcode_t checkEANcode(const char* str);
 
 extern "C" DELTA_API int DCM_Conn_serial(void);
+
+extern "C" DELTA_API dcm_errcode_t DCM_Extract_from_cell(unsigned int cellnum, code_t code);
+extern "C" DELTA_API dcm_errcode_t DCM_Put_item(unsigned int cellnum, code_t code);

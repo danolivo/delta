@@ -4,12 +4,12 @@
 
 #include "assert.h"
 #include "com.h" /* for ERRMSG_MAX_LEN */
+#include "common.h"
 #include "database.h"
 #include "delta.h"
 #include "sqlite3.h"
 
 #define DBFILENAME			"database.dblite"
-#define CELLS_NUMBER		(1768)
 
 char dberrstr[ERRMSG_MAX_LEN];
 char dbpathname[PATH_STR_MAX_LEN] = { 0 };
@@ -110,7 +110,7 @@ check_database()
 	return ok;
 }
 
-errcode_t
+dcm_errcode_t
 open_database(const char* path, bool create)
 {
 	assert(path != NULL);
@@ -246,7 +246,7 @@ cell_number_cb(void* a_param, int argc, char** argv, char** column)
  * Other case, return a first cell, contains this EANCode value.
  * Return cell number in the range of [1 .. CELLS_NUMBER] or error code < 0.
  */
-errcode_t
+dcm_errcode_t
 db_cell_number(const char *EANCode, int *cellnum)
 {
 	char* err = 0;
