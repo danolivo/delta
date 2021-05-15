@@ -399,7 +399,7 @@ execute_command(int command, const char* data)
 
 	case ADD_NEW_ITEM:
 		assert(strlen(wrtdatareq) > 0);
-		elog(LOG, "START MODBUS PROTOCOL OF ADDITION DATA. modbus cmd='%s'\n", wrtdatareq);
+		elog(LOG, "Start usage of MODBUS protocol for code addition. modbus cmd='%s'\n", wrtdatareq);
 		/* Write data */
 		if ((errcode = send_modbus_data(wrtdatareq, DEFAULT_TIMEOUT)) < 0)
 			return errcode;
@@ -448,7 +448,7 @@ execute_command(int command, const char* data)
 			 * Try to clean registers. We don't know details of this problem
 			 * and don't check result of this operation.
 			 */
-			(void) send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
 
 			/* Restore error message. */
 			memset(errmsg, 0, ERRMSG_MAX_LEN);
@@ -465,7 +465,7 @@ execute_command(int command, const char* data)
 
 		assert(strlen(wrtdatareq) > 0);
 
-		elog(LOG, "START MODBUS command chain to extract a product. modbus cmd='%s'\n", wrtdatareq);
+		elog(LOG, "Start usage of MODBUS protocol for a product extraction. modbus cmd='%s'\n", wrtdatareq);
 
 		/* Write data */
 		if ((errcode = send_modbus_data(wrtdatareq, DEFAULT_TIMEOUT)) < 0)
@@ -780,7 +780,7 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 		return DB_INCORRECT_STATE;
 	}
 
-	elog(LOG, "Try to put EAN code %s to cellnum: %d (%s)", code, cellnum, AH4);
+	elog(LOG, "Try to put EAN code '%s' into cell No. %d (%s)", code, cellnum, AH4);
 
 	if ((errcode = execute_command(ADD_NEW_ITEM, AH4)) != SUCCESS)
 	{
@@ -871,8 +871,8 @@ DCM_Extract_from_cell(unsigned int cellnum, code_t code)
 			"Error during cleaning the cell %d in the database.\nDETAILS: %s", cellnum, dberrstr);
 		return DB_ACCESS_FAILED;
 	}
-	elog(LOG, "Extraction of the product with EAN code '%s' to cellnum '%d' has finished.", code, cellnum);
 
+	elog(LOG, "Extraction of the product with EAN code '%s' from cellnum '%d' has finished.", code, cellnum);
 	return SUCCESS;
 }
 

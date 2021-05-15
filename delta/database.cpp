@@ -312,6 +312,39 @@ db_store_code(unsigned int cellnum, code_t code)
 	return true;
 }
 
+/*
+ * Clean EAN code column of the tuple with this cell number.
+ * return true if ok, or false on error.
+ * Set code to the value of EAN code from the cell has cleaned.
+ * Set code to zero-string value if cell had contained nothing.
+ */
+bool
+db_remove_code(unsigned int cellnum, code_t code)
+{
+	char SQL[QUERY_STR_MAX_LEN] = { 0 };
+	char* tmpcode = db_get_cell_code(cellnum);
+	char* err = NULL;
+
+	memset(code, 0, sizeof(code_t));
+
+	if (tmpcode == NULL)
+		/* code is NULL no need to UPDATE database column. */
+		return true;
+
+	snprintf(SQL, QUERY_STR_MAX_LEN,
+		"UPDATE data SET EANcode = NULL WHERE cell = %d", cellnum);
+
+	/* Need to clean value in the cell. */
+	if (sqlite3_exec(db, SQL, NULL, NULL, &err))
+	{
+		snprintf(dberrstr, ERRMSG_MAX_LEN, "SQL error: '%s'", err);
+		sqlite3_free(err);
+		return false;
+	}
+
+	return true;
+}
+
 int
 cell_code_cb(void* a_param, int argc, char** argv, char** column)
 {
@@ -339,13 +372,13 @@ cell_code_cb(void* a_param, int argc, char** argv, char** column)
 char*
 db_get_cell_code(int cellnum)
 {
-	char* err = 0;
+	char* err = NULL;
 	char SQL[QUERY_STR_MAX_LEN] = { 0 };
 	code_t code = { 0 };
 
 	snprintf(SQL, QUERY_STR_MAX_LEN,
 		"SELECT EANcode FROM data WHERE cell = %d", cellnum);
-	printf("CODE\n");
+
 	if (sqlite3_exec(db, SQL, cell_code_cb, (void*)code, &err))
 	{
 		snprintf(dberrstr, ERRMSG_MAX_LEN, "SQL error: '%s'", err);
