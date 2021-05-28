@@ -345,9 +345,7 @@ execute_command(int command, const char* data)
 		assert(strlen(data) == 4);
 		memset(wrtdatareq, 0, COMMAND_MAX_LENGTH);
 
-		len = snprintf(wrtdatareq, COMMAND_MAX_LENGTH,
-			"%s%s",
-			":01101065000102", data);
+		len = snprintf(wrtdatareq, COMMAND_MAX_LENGTH, "%s%s", ":01101065000102", data);
 		assert(len < COMMAND_MAX_LENGTH);
 	}
 
@@ -608,13 +606,13 @@ DCM_Connection(int portnum)
 		com_port_number = portnum;
 
 		/* Initial cleaning of registers. */
-		if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) < 0)
+		if ((errcode = send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT)) != SUCCESS)
 		{
 			elog(ERR, "Error during cleaning of the service registers of controller.\nCONTEXT:%s (errcode = %d)\n", errmsg, errcode);
 			goto cleanup;
 		}
 
-		if ((errcode = execute_command(CHECK_PROTOCOL, 0)) != 0)
+		if ((errcode = execute_command(CHECK_PROTOCOL, 0)) != SUCCESS)
 		{
 			elog(ERR, "Error during controller recognizing.\nCONTEXT:%s (%d)\n", errmsg, errcode);
 			goto cleanup;
@@ -784,10 +782,13 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 
 	if ((errcode = execute_command(ADD_NEW_ITEM, AH4)) != SUCCESS)
 	{
-		elog(CLOG,
-			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
+		elog(CLOG, "%s", DCMErrStr);
+
+		/* Clean registers before the return. */
+		(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+
 		return errcode;
 	}
 
@@ -861,6 +862,10 @@ DCM_Extract_from_cell(unsigned int cellnum, code_t code)
 	{
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN, "Item extraction problem.\nDETAILS: %s.", errmsg);
 		elog(ERR, "%s", DCMErrStr);
+
+		/* Clean registers before the return. */
+		(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+
 		return errcode;
 	}
 
