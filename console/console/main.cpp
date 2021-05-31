@@ -45,6 +45,7 @@ show_help()
 	printf("f - close connection to controller.\n");
 	printf("h - this text.\n");
 	printf("i - create database file (if still doesn't exists).\n");
+	printf("p - Push a product with random-generated 13-digit EAN code into the cell.\n");
 	printf("r - reset database.\n");
 	printf("z - dump database.\n");
 	printf("q - exit from this program.\n");
@@ -59,6 +60,11 @@ execute_console_command(char cmd)
 	{
 	case 'a': /* Add goods. */
 		global_state = 2;
+		//		debugging_delay();
+		break;
+
+	case 'p': /* Push a product with random-generated EAN code into the cell. */
+		global_state = 4;
 		//		debugging_delay();
 		break;
 
@@ -250,6 +256,37 @@ main(int argc, char** argv)
 		}
 		break;
 
+		case 4: /* Push a product into the cell. */
+		{
+			code_t code = { 0 };
+			int count;
+			unsigned int cellnum;
+
+			for (count = 0; count < 13; count++)
+			{
+				int x = rand() % 10;
+				sprintf(&code[count], "%1d", x);
+			}
+
+			printf("Write a cell number and press ENTER: ");
+			FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
+
+			(void)scanf("%u", &cellnum);
+
+			if (cellnum < 1 || cellnum > CELLS_NUMBER)
+				printf("Incorrect cell number %d!\n", cellnum);
+			else
+			{
+				if (!DCM_Put_item(cellnum, code))
+					printf("A product '%s' addition problems.\nDETAILS: %s", code, DCMErrStr);
+				printf("Product '%s' added into the cell %d. ", code, cellnum);
+			}
+
+			global_state = 0;
+			debugging_delay();
+		}
+		break;
+
 		case 3: /* Extract a product. */
 		{
 			code_t code = { 0 };
@@ -269,7 +306,7 @@ main(int argc, char** argv)
 				printf("Write the cell number in the range from 1 to %d and press ENTER: ", CELLS_NUMBER);
 				FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));
 				count = scanf("%u", &cellnum);
-	
+
 				if (count != 1 || cellnum < 1 || cellnum > CELLS_NUMBER)
 					printf("Incorrect cell number: '%d'!\n", cellnum);
 

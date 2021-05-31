@@ -11,7 +11,8 @@
 
 #define COMMAND_MAX_LENGTH	(100)
 
-#define DEFAULT_TIMEOUT (100) /* ms */
+#define DEFAULT_TIMEOUT		(1000) /* ms */
+#define DEFAULT_CMD_TIMEOUT (30) /* s */
 
 #define REQ_CLR_REGS		"01101064000306000000000000" /* Clear D100,D101 and D102 */
 #define REQ_READ_CMD		":010310640001" /* D100 */
@@ -277,9 +278,11 @@ IsRegistersEmpty(const char* data, int nreqs)
 static dcm_errcode_t
 wait_cmd_cleanup(int timeout)
 {
-	time_t start, end;
-	dcm_errcode_t errcode;
-	double seconds;
+	time_t			start;
+	time_t			end;
+	dcm_errcode_t	errcode;
+	double			seconds;
+	char			tmp_errmsg[ERRMSG_MAX_LEN] = { 0 };
 
 	start = time(NULL);
 	do
@@ -295,6 +298,11 @@ wait_cmd_cleanup(int timeout)
 			return SUCCESS;
 	} while (seconds < timeout);
 
+	/* Clean all our registers before finish unlucky operation. Save previous error message. */
+	memcpy(tmp_errmsg, errmsg, strlen(errmsg) + 1);
+	(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+	memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
+
 	return CNTL_UNKNOWN_PROBLEM;
 }
 
@@ -304,6 +312,7 @@ wait_cmd_result(int timeout)
 	time_t			start;
 	dcm_errcode_t	errcode;
 	double			seconds;
+	char			tmp_errmsg[ERRMSG_MAX_LEN] = { 0 };
 
 	start = time(NULL);
 	do
@@ -318,7 +327,46 @@ wait_cmd_result(int timeout)
 			return SUCCESS;
 	} while (seconds < timeout);
 
+	/* Clean all our registers. Save previous error message. */
+	memcpy(tmp_errmsg, errmsg, strlen(errmsg) + 1);
+	(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+	memset(errmsg, 0, ERRMSG_MAX_LEN);
+	memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
+
 	return CNTL_UNKNOWN_PROBLEM;
+}
+
+static dcm_errcode_t
+process_result(const char* msg)
+{
+	dcm_errcode_t errcode;
+
+	assert(strlen(MAX_BUFFER_LENGTH) == 4);
+
+	(void)sscanf(msg, "%04X", &errcode);
+
+	if (errcode != SUCCESS)
+	{
+		char* ptr;
+
+		elog(LOG, "Error detected: msg='%s', errcode = %d.", msg, errcode);
+
+		/* Save error message before sending cleanup command. */
+		ptr = _strdup(errmsg);
+
+		/*
+		 * Try to clean registers. We don't know details of this problem
+		 * and don't check result of this operation.
+		 */
+		(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
+
+		/* Restore error message. */
+		memset(errmsg, 0, ERRMSG_MAX_LEN);
+		snprintf(errmsg, ERRMSG_MAX_LEN, "%s", ptr);
+		free(ptr);
+	}
+
+	return errcode;
 }
 
 /*
@@ -372,13 +420,12 @@ execute_command(int command, const char* data)
 		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
-				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
-				com_port_number, recvmsg);
+				"COM%d: Controller doesn't clean command register.", com_port_number);
 			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != SUCCESS)
+		if (wait_cmd_result(DEFAULT_CMD_TIMEOUT) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
@@ -412,15 +459,14 @@ execute_command(int command, const char* data)
 		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
-				"COM%d: Controller doesn't clean command register.\nDETAILS: data in registers=\'%s\'",
-				com_port_number, recvmsg);
+				"COM%d: Controller doesn't clean command register.", com_port_number);
 			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		elog(LOG, "Controller cleaned its registers.");
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != SUCCESS)
+		if (wait_cmd_result(DEFAULT_CMD_TIMEOUT) != SUCCESS)
 		{
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code.", com_port_number);
@@ -429,38 +475,16 @@ execute_command(int command, const char* data)
 
 		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
 
-		if (strcmp(recvmsg, "0001") != 0)
+		if ((errcode = process_result(recvmsg)) != SUCCESS)
 		{
-			char* ptr;
-
-			(void)sscanf(recvmsg, "%02X", &errcode);
-			elog(LOG, "Error detected: errcode = '%d'.", errcode);
-
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller failed to add the item.\nDETAILS: error code in register=\'%s\'",
 				com_port_number, recvmsg);
-
-			/* Save error message before sending cleanup command. */
-			ptr = _strdup(errmsg);
-			/*
-			 * Try to clean registers. We don't know details of this problem
-			 * and don't check result of this operation.
-			 */
-			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
-
-			/* Restore error message. */
-			memset(errmsg, 0, ERRMSG_MAX_LEN);
-			snprintf(errmsg, ERRMSG_MAX_LEN, "%s", ptr);
-			free(ptr);
-
 			return errcode;
 		}
 		break;
 
 	case GET_CELLNUM_ITEM: /* Send command to extract a product from the cell */
-	{
-		char tmp_errmsg[ERRMSG_MAX_LEN] = { 0 };
-
 		assert(strlen(wrtdatareq) > 0);
 
 		elog(LOG, "Start usage of MODBUS protocol for a product extraction. modbus cmd='%s'\n", wrtdatareq);
@@ -478,57 +502,31 @@ execute_command(int command, const char* data)
 		/* Wait for reaction of the controller program. */
 		if (wait_cmd_cleanup(1) != SUCCESS)
 		{
-			snprintf(tmp_errmsg, ERRMSG_MAX_LEN,
-				"COM%d: Controller doesn't clean the command register.\nDETAILS: data in registers=\'%s\'",
-				com_port_number, recvmsg);
-			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
-			memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
+			snprintf(errmsg, ERRMSG_MAX_LEN,
+				"COM%d: Controller doesn't clean the command register.", com_port_number);
 			return CNTL_FORMAT_VIOLENCE;
 		}
 
 		elog(LOG, "Controller cleaned its registers.");
 
 		/* Wait for result code. */
-		if (wait_cmd_result(5) != SUCCESS)
+		if (wait_cmd_result(DEFAULT_CMD_TIMEOUT) != SUCCESS)
 		{
-			snprintf(tmp_errmsg, ERRMSG_MAX_LEN,
+			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Timeout expired. Controller doesn't return result code", com_port_number);
-			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
-			memcpy(errmsg, tmp_errmsg, strlen(tmp_errmsg) + 1);
 			return CNTL_TIMEOUT_EXPIRED;
 		}
 
 		elog(LOG, "Controller has returned a code '%s'.", recvmsg);
 
-		if (strcmp(recvmsg, "0001") != 0)
+		if ((errcode = process_result(recvmsg)) != SUCCESS)
 		{
-			char* ptr;
-
-			(void)sscanf(recvmsg, "%02X", &errcode);
-			elog(LOG, "Error detected: errcode = '%d'.", errcode);
-
 			snprintf(errmsg, ERRMSG_MAX_LEN,
 				"COM%d: Controller failed to get the item.\nDETAILS: error code in register=\'%s\'",
 				com_port_number, recvmsg);
-
-			/* Save error message before sending cleanup command. */
-			ptr = _strdup(errmsg);
-
-			/*
-			 * Try to clean registers. We don't know details of this problem
-			 * and don't check result of this operation.
-			 */
-			(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
-
-			/* Restore error message. */
-			memset(errmsg, 0, ERRMSG_MAX_LEN);
-			snprintf(errmsg, ERRMSG_MAX_LEN, "%s", ptr);
-			free(ptr);
-
 			return errcode;
 		}
 		break;
-	}
 
 	default:
 		snprintf(errmsg, ERRMSG_MAX_LEN, "Incorrect command");
@@ -785,10 +783,6 @@ DCM_Put_item(unsigned int cellnum, code_t code)
 		snprintf(DCMErrStr, ERRMSG_MAX_LEN,
 			"Error during item addition (errcode=%d).\n%s", errcode, errmsg);
 		elog(CLOG, "%s", DCMErrStr);
-
-		/* Clean registers before the return. */
-		(void)send_modbus_data(REQ_WRITE_CLEAN, DEFAULT_TIMEOUT);
-
 		return errcode;
 	}
 
